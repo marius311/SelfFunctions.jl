@@ -1,0 +1,7 @@
+name = "SelfFunctions"
+uuid = "72ba9e92-bcf5-11e8-095f-37966c5d5655"
+authors = ["Marius Millea <mariusmillea@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
