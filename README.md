@@ -22,7 +22,7 @@ struct Rosenbrock{T}
     b::T
 end
 
-# define some mathematical functions
+# define some mathematical function
 @self Rosenbrock rosen(x,y) = (a-x)^2 + b*(y-x^2)^2
 
 # create model and call function
@@ -40,7 +40,7 @@ to
 rosen(self::Rosenbrock,x,y) = (self.a-x)^2 + self.b*(y-x^2)^2
 ```
 
-Note that because the fields of `Rosenbrock` are known, the macro knows to only modify `a` and `b`. It is moderately smart about which variables to modify; many, but not all, cases should work. Note also that recursive calls to "self" functions do not explicitly need to pass the first argument, this is inserted automatically:
+Note that because the fields of `Rosenbrock` are known, the macro knows to only modify `a` and `b`. It is moderately smart about which variables to modify; many, but not all, cases should work. Note also that inner calls to "self" functions do not explicitly need to pass the first argument, this is inserted automatically:
 
 ```julia
 @self Rosenbrock shifted_rosen(x,y) = rosen(x+1, y+1)
