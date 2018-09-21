@@ -48,3 +48,8 @@ shifted_rosen(r, 2, 3) # gives 54 as before
 ```
 
 Thanks to @fcard for the cool trick which allows this to work with no performance overhead (see also https://github.com/fcard/SelfFunctions.jl which does basically the same thing but with different syntax, although as of this writing is not compatible with Julia 1.0).
+
+Capturing type parameters works as you might expect,
+```julia
+@self Rosenbrock{T} rosen(x,y) where {T} = (a-x)^2 + b*(y-x^2)^2 + zero(T)
+```

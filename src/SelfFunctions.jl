@@ -16,7 +16,8 @@ Base.show(io::IO, sf::SelfFunction) = print(io, "$(sf.name) (self function of ty
 
 
 macro self(typ, funcdef)
-    fields = @eval __module__ fieldnames($typ)
+    @capture(typ, basetyp_{_} | basetyp_)
+    fields = @eval __module__ fieldnames($basetyp)
     sfuncdef = splitdef(funcdef)
     
     insert!(sfuncdef[:args],1,:(self::$typ))
@@ -68,7 +69,7 @@ macro self(typ, funcdef)
 
     quote
         $(combinedef(sfuncdef))
-        Base.@__doc__ const $(esc(fname)) = SelfFunction($(QuoteNode(fname)), $(esc(typ)), $(sfuncdef[:name]))
+        Base.@__doc__ const $(esc(fname)) = SelfFunction($(QuoteNode(fname)), $(esc(basetyp)), $(sfuncdef[:name]))
     end
     
 end
