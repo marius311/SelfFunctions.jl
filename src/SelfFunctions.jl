@@ -1,6 +1,7 @@
 module SelfFunctions
 
-using MacroTools: splitdef, combinedef, postwalk, isexpr, @capture, isdef, splitarg
+
+using MacroTools: splitdef, combinedef, postwalk, isexpr, @capture, isdef, splitarg, @q, block
 
 export @self
 
@@ -36,17 +37,28 @@ macro self(typ, funcdef)
                 # in f(x=x) only the second `x` should (possibly) become self.x
                 Expr(:kw, esc(ex.args[1]), rvisit(ex.args[2]))
             elseif @capture(ex, ((f_(args__; kwargs__)) | (f_(args__; kwargs__)::T_) | (f_(args__)) | (f_(args__)::T_)))
-                # pass `self` argument implicitly when calling other "self" functions
-                ex = :(selfcall($(rvisit(f)), $(esc(:self)), $(rvisit.(args == nothing ? [] : args)...);  $(rvisit.(kwargs == nothing ? [] : kwargs)...)))
+                # function call
+                if isa(f,Symbol) && isdefined(__module__,f)
+                    if isdefined(__module__,Symbol("self_",f))
+                        # is definitely a self function
+                        ex = :($(esc(Symbol("self_",f)))($(esc(:self)), $(rvisit.(args == nothing ? [] : args)...);  $(rvisit.(kwargs == nothing ? [] : kwargs)...)))
+                    else
+                        # is definitely not a "self" function
+                        ex = :($(rvisit(f))($(rvisit.(args == nothing ? [] : args)...);  $(rvisit.(kwargs == nothing ? [] : kwargs)...)))
+                    end
+                else
+                    # we don't know since it isnt defined yet (use the selfcall machinery)
+                    ex = :(selfcall($(rvisit(f)), $(esc(:self)), $(rvisit.(args == nothing ? [] : args)...);  $(rvisit.(kwargs == nothing ? [] : kwargs)...)))
+                end
                 T == nothing ? ex : :($ex::$(esc(T)))
             elseif isdef(ex)
-                # inner function definition, need to be careful about scope here
+                # inner function definition (note: need to be careful about scope here)
                 sdef = splitdef(ex)
                 func_args = append!((map(first,map(splitarg,sdef[k])) for k in (:args, :kwargs))...)
                 for k in (:args, :kwargs)
                     map!(x->rvisit(x; inside_func_args=true), sdef[k], sdef[k])
                 end
-                sdef[:body] = visit(sdef[:body], locals=[locals; func_args])
+                sdef[:body] = block(visit(sdef[:body], locals=[locals; func_args]))
                 for k in (:params, :name, :rtype, :whereparams)
                     if k in keys(sdef); sdef[k] = esc.(sdef[k]); end
                 end
@@ -60,14 +72,15 @@ macro self(typ, funcdef)
         end
     end
 
-    sfuncdef[:body] = visit(sfuncdef[:body])
+    sfuncdef[:body] = block(visit(sfuncdef[:body]))
     fname = sfuncdef[:name]
     sfuncdef[:name] = esc(Symbol("self_", sfuncdef[:name]))
     for k in (:args, :kwargs, :params, :rtype, :whereparams)
         if k in keys(sfuncdef); sfuncdef[k] = esc.(sfuncdef[k]); end
     end
 
-    quote
+    @q begin
+        $(__source__)
         $(combinedef(sfuncdef))
         Base.@__doc__ const $(esc(fname)) = SelfFunction($(QuoteNode(fname)), $(esc(basetyp)), $(sfuncdef[:name]))
     end
