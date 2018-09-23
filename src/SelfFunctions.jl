@@ -36,20 +36,21 @@ macro self(typ, funcdef)
             if isexpr(ex,:kw)
                 # in f(x=x) only the second `x` should (possibly) become self.x
                 Expr(:kw, esc(ex.args[1]), rvisit(ex.args[2]))
-            elseif @capture(ex, ((f_(args__; kwargs__)) | (f_(args__; kwargs__)::T_) | (f_(args__)) | (f_(args__)::T_)))
+            elseif @capture(ex, (f_(args__; kwargs__) | f_(args__; kwargs__)::T_ | f_(args__) | f_(args__)::T_))
                 # function call
                 if isa(f,Symbol) && isdefined(__module__,f)
                     if isdefined(__module__,Symbol("self_",f))
                         # is definitely a self function
-                        ex = :($(esc(Symbol("self_",f)))($(esc(:self)), $(rvisit.(args == nothing ? [] : args)...);  $(rvisit.(kwargs == nothing ? [] : kwargs)...)))
+                        ex = :($(esc(Symbol("self_",f)))($(esc(:self)), $(map(rvisit,args)...)))
                     else
                         # is definitely not a "self" function
-                        ex = :($(rvisit(f))($(rvisit.(args == nothing ? [] : args)...);  $(rvisit.(kwargs == nothing ? [] : kwargs)...)))
+                        ex = :($(rvisit(f))($(map(rvisit,args)...)))
                     end
                 else
                     # we don't know since it isnt defined yet (use the selfcall machinery)
-                    ex = :(selfcall($(rvisit(f)), $(esc(:self)), $(rvisit.(args == nothing ? [] : args)...);  $(rvisit.(kwargs == nothing ? [] : kwargs)...)))
+                    ex = :(selfcall($(rvisit(f)), $(esc(:self)), $(map(rvisit,args)...)))
                 end
+                if kwargs != nothing; insert!(ex.args,2,Expr(:parameters,map(rvisit,kwargs)...)); end
                 T == nothing ? ex : :($ex::$(esc(T)))
             elseif isdef(ex)
                 # inner function definition (note: need to be careful about scope here)
