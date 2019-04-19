@@ -2,6 +2,7 @@ module SelfFunctions
 
 
 using MacroTools: splitdef, combinedef, postwalk, isexpr, @capture, isdef, splitarg, @q, block
+using Setfield
 
 export @self
 
@@ -20,7 +21,7 @@ macro self(typ, funcdef)
     @capture(typ, basetyp_{_} | basetyp_)
     fields = @eval __module__ fieldnames($basetyp)
     sfuncdef = splitdef(funcdef)
-    
+    mutating = occursin("!", string(sfuncdef[:name]))
     insert!(sfuncdef[:args],1,:(self::$typ))
     
     function visit(ex; inside_func_args=false, locals=[])
@@ -28,30 +29,36 @@ macro self(typ, funcdef)
         if ex isa Symbol
             # replace `x` with `self.x` where needed 
             if ex in fields && !(ex in locals) && !inside_func_args
-                esc(:(self.$ex))
+                :(self.$ex)
             else
-                startswith(string(ex),"@") ? ex : esc(ex)
+                ex
+                # startswith(string(ex),"@") ? ex : esc(ex)
             end
+        elseif mutating && isexpr(ex,:(=)) && (ex.args[1] isa Symbol) && (ex.args[1] in fields) && !(ex.args[1] in locals) && !inside_func_args
+            # we're in a mutating function and trying to set one of self's fields, so use Setfield
+            # the let-block avoids a possible Core.box if we're assigning a closure that uses `self`
+            # :(SelfFunctions.@set! $(rvisit(ex.args[1])) = let self=self; $(map(rvisit,ex.args[2:end])...) end)
+            :(SelfFunctions.@set! $(rvisit(ex.args[1])) = $(rvisit(ex.args[2])))
         elseif ex isa Expr
             if isexpr(ex,:kw)
                 # in f(x=x) only the second `x` should (possibly) become self.x
-                Expr(:kw, esc(ex.args[1]), rvisit(ex.args[2]))
+                Expr(:kw, ex.args[1], rvisit(ex.args[2]))
             elseif @capture(ex, (f_(args__; kwargs__) | f_(args__; kwargs__)::T_ | f_(args__) | f_(args__)::T_))
                 # function call
-                if isa(f,Symbol) && isdefined(__module__,f)
+                if isa(f,Symbol) && (isdefined(__module__,f) || f==:ccall)
                     if isdefined(__module__,Symbol("self_",f))
                         # is definitely a self function
-                        ex = :($(esc(Symbol("self_",f)))($(esc(:self)), $(map(rvisit,args)...)))
+                        ex = :($(Symbol("self_",f))(self, $(map(rvisit,args)...)))
                     else
                         # is definitely not a "self" function
                         ex = :($(rvisit(f))($(map(rvisit,args)...)))
                     end
                 else
                     # we don't know since it isnt defined yet (use the selfcall machinery)
-                    ex = :(selfcall($(rvisit(f)), $(esc(:self)), $(map(rvisit,args)...)))
+                    ex = :($selfcall($(rvisit(f)), self, $(map(rvisit,args)...)))
                 end
                 if kwargs != nothing; insert!(ex.args,2,Expr(:parameters,map(rvisit,kwargs)...)); end
-                T == nothing ? ex : :($ex::$(esc(T)))
+                T == nothing ? ex : :($ex::$T)
             elseif isdef(ex)
                 # inner function definition (note: need to be careful about scope here)
                 sdef = splitdef(ex)
@@ -60,9 +67,6 @@ macro self(typ, funcdef)
                     map!(x->rvisit(x; inside_func_args=true), sdef[k], sdef[k])
                 end
                 sdef[:body] = block(visit(sdef[:body], locals=[locals; func_args]))
-                for k in (:params, :name, :rtype, :whereparams)
-                    if k in keys(sdef); sdef[k] = esc.(sdef[k]); end
-                end
                 combinedef(sdef)
             else
                 # recurse
@@ -72,8 +76,11 @@ macro self(typ, funcdef)
             ex
         end
     end
-
-    sfuncdef[:body] = block(visit(sfuncdef[:body]))
+    
+    if mutating
+        push!(sfuncdef[:body].args, :(return self))
+    end
+    sfuncdef[:body] = block(esc(visit(sfuncdef[:body])))
     fname = sfuncdef[:name]
     sfuncdef[:name] = esc(Symbol("self_", sfuncdef[:name]))
     for k in (:args, :kwargs, :params, :rtype, :whereparams)
