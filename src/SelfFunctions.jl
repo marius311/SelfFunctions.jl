@@ -46,9 +46,9 @@ macro self(typ, funcdef)
             elseif @capture(ex, (f_(args__; kwargs__) | f_(args__; kwargs__)::T_ | f_(args__) | f_(args__)::T_))
                 # function call
                 if isa(f,Symbol) && (isdefined(__module__,f) || f==:ccall)
-                    if isdefined(__module__,Symbol("self_",f))
+                    if Base.eval(__module__,f) isa SelfFunction
                         # is definitely a self function
-                        ex = :($(Symbol("self_",f))(self, $(map(rvisit,args)...)))
+                        ex = :($(Base.eval(__module__,f))(self, $(map(rvisit,args)...)))
                     else
                         # is definitely not a "self" function
                         ex = :($(rvisit(f))($(map(rvisit,args)...)))
