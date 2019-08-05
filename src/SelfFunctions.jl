@@ -18,18 +18,19 @@ Base.show(io::IO, sf::SelfFunction) = print(io, "$(sf.name) (self function of ty
 
 
 macro self(typ, funcdef)
-    @capture(typ, basetyp_{_} | basetyp_)
+    @capture(typ, self_::basetyp_{ } | self_::basetyp_ | basetyp_{_} | basetyp_) || throw(ArgumentError("Invalid @self usage."))
+    if (self==nothing); self = gensym("self"); end
     fields = @eval __module__ fieldnames($basetyp)
     sfuncdef = splitdef(funcdef)
     mutating = occursin("!", string(sfuncdef[:name]))
-    insert!(sfuncdef[:args],1,:(self::$typ))
+    insert!(sfuncdef[:args],1,:($self::$typ))
     
     function visit(ex; inside_func_args=false, locals=[])
         rvisit(ex; kwargs...) = visit(ex; locals=locals, kwargs...)
         if ex isa Symbol
             # replace `x` with `self.x` where needed 
             if ex in fields && !(ex in locals) && !inside_func_args
-                :(self.$ex)
+                :($self.$ex)
             else
                 ex
                 # startswith(string(ex),"@") ? ex : esc(ex)
@@ -48,17 +49,19 @@ macro self(typ, funcdef)
                 if isa(f,Symbol) && (isdefined(__module__,f) || f==:ccall)
                     if Base.eval(__module__,f) isa SelfFunction
                         # is definitely a self function
-                        ex = :($(Base.eval(__module__,f))(self, $(map(rvisit,args)...)))
+                        ex = :($(Base.eval(__module__,f))($self, $(map(rvisit,args)...)))
                     else
                         # is definitely not a "self" function
                         ex = :($(rvisit(f))($(map(rvisit,args)...)))
                     end
                 else
                     # we don't know since it isnt defined yet (use the selfcall machinery)
-                    ex = :($selfcall($(rvisit(f)), self, $(map(rvisit,args)...)))
+                    ex = :($selfcall($(rvisit(f)), $self, $(map(rvisit,args)...)))
                 end
                 if kwargs != nothing; insert!(ex.args,2,Expr(:parameters,map(rvisit,kwargs)...)); end
-                T == nothing ? ex : :($ex::$T)
+                ex = T == nothing ? ex : :($ex::$T)
+                ex = endswith(string(f),'!') ? :($self = $ex) : ex
+                ex
             elseif isdef(ex)
                 # inner function definition (note: need to be careful about scope here)
                 sdef = splitdef(ex)
@@ -78,7 +81,7 @@ macro self(typ, funcdef)
     end
     
     if mutating
-        push!(sfuncdef[:body].args, :(return self))
+        push!(sfuncdef[:body].args, :(return $self))
     end
     sfuncdef[:body] = block(esc(visit(sfuncdef[:body])))
     fname = sfuncdef[:name]
